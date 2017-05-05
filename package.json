@@ -1,0 +1,21 @@
+{
+  "name": "collimate",
+  "version": "1.0.0",
+  "description": "convert a list of records into typed columns",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "csv",
+    "records",
+    "column",
+    "columnar",
+    "database"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "csv-parse": "^1.2.0"
+  }
+}
