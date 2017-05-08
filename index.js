@@ -1,5 +1,6 @@
 /* csv parser that produces typed columnar output */
 var fs = require('fs'),
+	path = require('path'),
 	parse = require('csv-parse/lib/sync');
 
 function isnumber(obj){ return Object.prototype.toString.call(obj) === "[object Number]";}
@@ -74,6 +75,20 @@ var constructor_map = {
 	"ord16" : Int16Array
 };
 
+var ext_map = {
+	"int8" : ".i8",
+	"uint8" : ".u8",
+	"int16" : ".i16",
+	"uint16" : ".u16",
+	"int32" : ".i32",
+	"uint32" : ".u32",
+	"float32" : ".f32",
+	"float64" : ".f64",
+	"ord8" : ".s8",
+	"ord16" : ".s16",
+	"str" : ".json"
+};
+
 function collimate(rows){
 
 	if (rows == null || rows.length == 0) return { "columns" : {}, "keys" : {}, "types" : []};
@@ -121,7 +136,8 @@ function collimate(rows){
 		}
 
 		// initialize the set of distinct values
-		distincts[j] = {value : value};
+		distincts[j] = {};
+		distincts[j][value] = value;
 		counts[j] = 1;
 	}
 
@@ -347,22 +363,68 @@ function collimate(rows){
 	return {"columns" : columns, "keys" : decoders, "types" : type_map};
 }
 
+// sanitize column names
+function sanitize(str){
+
+	var sane = str.toLowerCase();
+	sane = sane.replace(/(^\W+)|(\W+$)/g, '');
+	sane = sane.replace(/&/g, 'and');
+	sane = sane.replace(/@/g, 'at');
+	sane = sane.replace(/%/g, 'percent');
+	sane = sane.replace(/-/g, '_');
+	sane = sane.replace(/\W+/g, '_');
+
+	return sane;
+}
+
 var args = process.argv;
 if(args.length < 3) throw new Error("Not enough arguments");
 
-var path = args[2];
-var text = fs.readFileSync(path);
+var fpath = args[2];
+var text = fs.readFileSync(fpath);
 var rows = parse(text, {delimiter: ',', columns:true, trim:true, auto_parse:false});
 
 var result = collimate(rows);
-// sanitize column names
-
-console.log(Object.keys(result.columns));
+//console.log(Object.keys(result.columns));
 //console.log(Object.keys(result.keys));
-console.log(result.types);
+//console.log(result.types);
 /*
 for(key in result.keys){
 	var vals = result.keys[key];
 	console.log(vals.slice(0, 10));
 }*/
 // write columns
+
+// create directory
+var fext = path.extname(fpath);
+var fname = path.basename(fpath, fext);
+
+if (!fs.existsSync(fname)){
+	console.log("creating directory " + fname);
+	fs.mkdirSync(fname);
+}
+
+
+// write files
+var dir = fname + "/";
+var ext;
+var sane_name;
+for(var name in result.columns){
+
+	// write columns to file
+	sane_name = sanitize(name);
+
+	ext = ext_map[result.types[name]];
+	console.log("writing file: " + dir + sane_name + ext);
+	if(ext == ".json"){
+		fs.writeFileSync(dir + sane_name + ext, JSON.stringify(result.columns[name], null, 1));
+	} else {
+		fs.writeFileSync(dir + sane_name + ext, new Buffer(result.columns[name].buffer));
+	}
+
+	// do we need to write a key file?
+	if(name in result.keys){
+		// yes
+		fs.writeFileSync(dir + sane_name + ".key", JSON.stringify(result.keys[name], null, 1));
+	}
+}
