@@ -2,6 +2,9 @@
 var fs = require('fs'),
 	parse = require('csv-parse/lib/sync');
 
+function isnumber(obj){ return Object.prototype.toString.call(obj) === "[object Number]";}
+function isinteger(num){ return num % 1 === 0;}
+
 // type scanning strategies:
 // constant, percentage, full
 
@@ -11,11 +14,40 @@ var fs = require('fs'),
 // pristine, clean, dirty, toxic
 
 /* number of rows to scan for determining types */
-const SCAN_RANGE = 100;
+const MIN_SCAN_COUNT = 1000;
+const MIN_SCAN_FRACTION = 0.3;
+
+// map of percentage scanned to percentage ordinals likely encountered
+// given large enough N
+// 20% -> 80%
+// 10% -> 75%
+// 4% -> 64%
+// 1% -> 50%
+
 // if the number of distinct values in a column is less than this, we consider it ordinal
-const ORDINAL_FRACTION = 0.1;
-// the fraction of all ordinal values we are likely to encounter in our scan
-const ESTIMATED_ENCOUNTER_FRACTION = 0.75;
+const ORDINAL_FRACTION = 0.2; // this should probably be logarithmic, instead of linear
+
+// the fraction of all ordinal values we are likely to encounter as a function of
+// sample percentage.
+const SAMPLING_ENCOUNTER_FRACTION_MAP = {
+		"1.0" : 1.0,
+		"0.8" : 0.7,
+		"0.4" : 0.65,
+		"0.2" : 0.6,
+		"0.1" : 0.5,
+		"0.04" : 0.3,
+		"0.01" : 0.1
+};
+
+// the exponent on the sampling encounter fraction as a function of
+// data disorder, higher disorder should produce larger exponents
+//const ESTIMATED_ENCOUNTER_FRACTION = 0.75;
+//const ESTIMATED_ENCOUNTER_FRACTION = 0.25; // this is low, to account for semi-structured data
+// this number is an educated guess and should really be a mapping
+// see this entropy calculation answer for a start:
+// http://stackoverflow.com/questions/990477/how-to-calculate-the-entropy-of-a-file
+// https://en.wikipedia.org/wiki/Entropy_(information_theory)#Data_as_a_Markov_process
+const ENTROPIC_ENCOUNTER_EXPONENT = 2; // inverse of entropy
 
 const MAX_ORDINAL = 65536;
 
@@ -28,9 +60,6 @@ const NULL_SET = {
 	"" : "",
 	"-" : "-"
 };
-
-var text = fs.readFileSync(path);
-var rows = parse(text, {delimiter: ',', columns:true, trim:true, auto_parse:true});
 
 var constructor_map = {
 	"int8" : Int8Array,
@@ -62,7 +91,8 @@ function collimate(rows){
 	// do the ordinal columns have NULLS?
 
 	// guess types from first row
-	// we start with the widest type that will accommodate the value found
+	// we start with the narrowest type that will accommodate the value found
+	// int32 -> float32 -> str
 	var types = [];
 	var distincts = [];
 	var counts = [];
@@ -79,11 +109,10 @@ function collimate(rows){
 		} else {
 			// no, try parsing it
 			if(+value === +value){
-				value = +value;
-				if(isinteger(value)) type[j] = 'int32';
+				if(isinteger(+value)) types[j] = 'int32';
 				else types[j] = 'float32';
 			} else if(value in NULL_SET) {
-				value = "null";
+				value = null;
 				types[j] = 'int32';
 			} else {
 				//assume generic string
@@ -91,27 +120,51 @@ function collimate(rows){
 			}
 		}
 
-		// initialized the set of distinct values
+		// initialize the set of distinct values
 		distincts[j] = {value : value};
 		counts[j] = 1;
 	}
 
-	var scan = SCAN_RANGE < N ? SCAN_RANGE : N;
-	var threshold = Math.ceil(N * ORDINAL_FRACTION);
-	threshold = threshold < (MAX_ORDINAL * ESTIMATED_ENCOUNTER_FRACTION) ?
-		threshold : (MAX_ORDINAL * ESTIMATED_ENCOUNTER_FRACTION);
+	// how many records should we scan, before deciding on types?
+	var scan = N < MIN_SCAN_COUNT ?
+		N : MIN_SCAN_COUNT > (N * MIN_SCAN_FRACTION) ? MIN_SCAN_COUNT : (N * MIN_SCAN_FRACTION);
+
+	console.log(scan);
+
+	// what threshold is ordinal?
+	// TODO: figure out how to integrate these concepts for determining ordinality:
+	// https://en.wikipedia.org/wiki/Diversity_index#True_diversity
+	// https://en.wikipedia.org/wiki/Entropy_(information_theory)#Entropy_as_a_measure_of_diversity
+	// http://stackoverflow.com/questions/990477/how-to-calculate-the-entropy-of-a-file
+	// https://en.wikipedia.org/wiki/Entropy_(information_theory)#Data_as_a_Markov_process
+	var threshold = Math.min(Math.ceil(N * ORDINAL_FRACTION), MAX_ORDINAL);
+
+	// adjust ordinal threshold based on how much of the data we're scanning
+	var sample_fraction = scan / N;
+	var estimated_encounter_fraction;
+	for(fraction in SAMPLING_ENCOUNTER_FRACTION_MAP){
+		if (sample_fraction <= +fraction){
+			estimated_encounter_fraction = Math.pow(SAMPLING_ENCOUNTER_FRACTION_MAP[fraction], ENTROPIC_ENCOUNTER_EXPONENT);
+			break;
+		}
+	}
+
+	threshold *= estimated_encounter_fraction;
+	console.log(threshold);
 
 	// if it's all integers except for elements which map to the null set,
 	// it's int32
 
 	// if it's a mixture of integers and floats except for elements which map to
 	// the null set, it's float32
+
 	// if it contain strings that don't map to the null set, it's a string
 
 	// all columns should be checked for ordinality
 	// a column is ordinal if it's count of distinct values is less than some
 	// threshold percentage of it's length (10%).
 
+	//console.log(types);
 	/* refine types */
 	var row, name, type;
 	for(var i = 0; i < scan; i++){
@@ -125,11 +178,10 @@ function collimate(rows){
 				// yes, check for deviations from int
 				if(!isnumber(value)){
 					if(+value === +value) {
-						value = +value;
-						if(isinteger(value)) type[j] = 'int32';
+						if(isinteger(+value)) types[j] = 'int32';
 						else types[j] = 'float32';
 					} else if(value in NULL_SET) {
-						value = "null";
+						value = null;
 					} else {
 						types[j] = 'str';
 					}
@@ -141,23 +193,24 @@ function collimate(rows){
 				// float? check for deviations from number
 				if(!isnumber(value)){
 					if(+value === +value) {
-						value = +value;
+						// parses as float: noop
 					} else if(value in NULL_SET) {
-						value = "null";
+						value = null;
 					} else {
+						//console.log(value);
 						types[j] = 'str';
 					}
 				}
 			} else {
 				// check for null set membership
 				if(value in NULL_SET) {
-					value = "null";
+					value = null;
 				}
 			}
 
 			// ordinal?
 			distinct = distincts[j];
-			if(counts[j] < threshold){
+			if(counts[j] <= threshold){
 				if(!(value in distinct)){
 					distinct[value] = value;
 					counts[j] += 1;
@@ -166,11 +219,13 @@ function collimate(rows){
 		}
 	}
 
+	console.log(counts);
+
 	// create columns
 	var columns = {};
-	var keys = {};
+	var decoders = {};
 	var encoders = {};
-	var counts;
+	var count;
 	for(var j = 0; j < names.length; j++){
 		name = names[j];
 		type = types[j];
@@ -179,22 +234,31 @@ function collimate(rows){
 		count = counts[j];
 		if(count <= threshold){
 			// yes, encode
-			var key = Object.keys(distincts[name]);
+			var distinct = distincts[j];
+			var decoder = [];
 			var encoder = {};
-			for(var k = 0; k < key; i++){
-				encoder[key[k]] = k;
+			var k = 0;
+			for(var s in distinct){
+				// map integer to distinct value
+				// use distinct[s] (instead of s) to get actual (non-string) value
+				decoder[k] = distinct[s];
+				// map distinct value to integer
+				encoder[distinct[s]] = k;
+				k++;
 			}
 
-			keys[name] = key;
+			decoders[name] = decoder;
 			encoders[name] = encoder;
 
 			// 8 bit?
-			if(count <= (256 * ESTIMATED_ENCOUNTER_FRACTION){
+			if(count <= (256 * estimated_encounter_fraction)){
 				// yes
 				columns[name] = new Uint8Array(N);
+				types[j] = 'str8';
 			} else {
 				// no, use 16 bit encoding
 				columns[name] = new Uint16Array(N);
+				types[j] = 'str16';
 			}
 		} else if(type == "str"){
 			// no, it's untyped
@@ -214,35 +278,87 @@ function collimate(rows){
 			type = types[j];
 			name = names[j];
 			value = row[name];
-			columns = columns[name];
+			count = counts[name];
+			column = columns[name];
 
-			if(type == "int32"){
-				if(+value === +value)
-					value = +value;
-				else
-					value = 0;
-			} else if(type == "float32"){
-				if(+value === +value)
-					value = +value;
-				else
-					value = NaN;
-			}
+			// TODO: null interplay with ordinal?
+			//if(value in NULL_SET) value = null;
 
 			// ordinal?
-			if(name in inv_keys){
-				encoder = inv_keys[name];
-				encoded = encoder[value];
+			if(name in encoders){
+				encoder = encoders[name];
+				// is it a null representation?
+				if(value in NULL_SET) value = null;
+
+				// value already encountered?
+				if(value in encoder){
+					// yes, retrieve it
+					encoded = encoder[value];
+				} else {
+					// no, we need to add it to the set of possible values
+
+					// does it expand us beyond our allotted encoding capacity?
+					if(count > 256 && type == "str8"){
+						// yes, expand 8 bit encoding to 16 bit
+						console.error("alloted encoding size for ordinal exceeded: str8.");
+						console.error("reallocating as str16.");
+						columns[name] = new Uint16Array(column);
+						types[j] = "str16";
+					} else if (count > 65536 && type == "str16"){
+						// yes, 16 bit isn't big enough
+						console.error("maximum encoding size for ordinal exceeded: str16.");
+						console.error("data loss may occur.");
+						// TODO: do something useful?
+					}
+
+					decoder = decoders[name];
+					encoded = decoder.length;
+					decoder.push(value);
+					encoder[value] = encoded;
+
+				}
 				column[i] = encoded;
 			} else {
+
+				if(type == "int32"){
+					if(+value === +value)
+						value = +value;
+					else
+						value = 0;
+				} else if(type == "float32"){
+					if(+value === +value)
+						value = +value;
+					else
+						value = NaN;
+				}
+
 				column[i] = value;
 			}
 
 		}
 	}
 
-	return {"columns" : columns, "keys" : keys, "types" : types};
+	type_map = {}
+	for(var j = 0; j < names.length; j++) type_map[names[j]] = types[j];
+	return {"columns" : columns, "keys" : decoders, "types" : type_map};
 }
 
+var args = process.argv;
+if(args.length < 3) throw new Error("Not enough arguments");
+
+var path = args[2];
+var text = fs.readFileSync(path);
+var rows = parse(text, {delimiter: ',', columns:true, trim:true, auto_parse:false});
+
+var result = collimate(rows);
 // sanitize column names
 
+console.log(Object.keys(result.columns));
+//console.log(Object.keys(result.keys));
+console.log(result.types);
+/*
+for(key in result.keys){
+	var vals = result.keys[key];
+	console.log(vals.slice(0, 10));
+}*/
 // write columns
