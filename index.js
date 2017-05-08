@@ -25,7 +25,7 @@ const MIN_SCAN_FRACTION = 0.3;
 // 1% -> 50%
 
 // if the number of distinct values in a column is less than this, we consider it ordinal
-const ORDINAL_FRACTION = 0.2; // this should probably be logarithmic, instead of linear
+const ORDINAL_FRACTION = 0.3; // this should probably be logarithmic, instead of linear
 
 // the fraction of all ordinal values we are likely to encounter as a function of
 // sample percentage.
@@ -70,8 +70,8 @@ var constructor_map = {
 	"uint32" : Uint32Array,
 	"float32" : Float32Array,
 	"flout64" : Float64Array,
-	"str8" : Int8Array,
-	"str16" : Int16Array
+	"ord8" : Int8Array,
+	"ord16" : Int16Array
 };
 
 function collimate(rows){
@@ -129,7 +129,8 @@ function collimate(rows){
 	var scan = N < MIN_SCAN_COUNT ?
 		N : MIN_SCAN_COUNT > (N * MIN_SCAN_FRACTION) ? MIN_SCAN_COUNT : (N * MIN_SCAN_FRACTION);
 
-	console.log(scan);
+	//console.log(N);
+	//console.log(scan);
 
 	// what threshold is ordinal?
 	// TODO: figure out how to integrate these concepts for determining ordinality:
@@ -143,14 +144,17 @@ function collimate(rows){
 	var sample_fraction = scan / N;
 	var estimated_encounter_fraction;
 	for(fraction in SAMPLING_ENCOUNTER_FRACTION_MAP){
-		if (sample_fraction <= +fraction){
+		if (sample_fraction >= +fraction){
+			//console.log(+fraction);
 			estimated_encounter_fraction = Math.pow(SAMPLING_ENCOUNTER_FRACTION_MAP[fraction], ENTROPIC_ENCOUNTER_EXPONENT);
 			break;
 		}
 	}
 
+	//console.log(sample_fraction);
+	//console.log(estimated_encounter_fraction);
 	threshold *= estimated_encounter_fraction;
-	console.log(threshold);
+	//console.log(threshold);
 
 	// if it's all integers except for elements which map to the null set,
 	// it's int32
@@ -210,7 +214,7 @@ function collimate(rows){
 
 			// ordinal?
 			distinct = distincts[j];
-			if(counts[j] <= threshold){
+			if(true || counts[j] <= threshold){
 				if(!(value in distinct)){
 					distinct[value] = value;
 					counts[j] += 1;
@@ -219,7 +223,7 @@ function collimate(rows){
 		}
 	}
 
-	console.log(counts);
+	//console.log(counts);
 
 	// create columns
 	var columns = {};
@@ -254,11 +258,11 @@ function collimate(rows){
 			if(count <= (256 * estimated_encounter_fraction)){
 				// yes
 				columns[name] = new Uint8Array(N);
-				types[j] = 'str8';
+				types[j] = 'ord8';
 			} else {
 				// no, use 16 bit encoding
 				columns[name] = new Uint16Array(N);
-				types[j] = 'str16';
+				types[j] = 'ord16';
 			}
 		} else if(type == "str"){
 			// no, it's untyped
@@ -298,15 +302,15 @@ function collimate(rows){
 					// no, we need to add it to the set of possible values
 
 					// does it expand us beyond our allotted encoding capacity?
-					if(count > 256 && type == "str8"){
+					if(count > 256 && type == "ord8"){
 						// yes, expand 8 bit encoding to 16 bit
-						console.error("alloted encoding size for ordinal exceeded: str8.");
-						console.error("reallocating as str16.");
+						console.error("alloted encoding size for ordinal exceeded: ord8.");
+						console.error("reallocating as ord16.");
 						columns[name] = new Uint16Array(column);
-						types[j] = "str16";
-					} else if (count > 65536 && type == "str16"){
+						types[j] = "ord16";
+					} else if (count > 65536 && type == "ord16"){
 						// yes, 16 bit isn't big enough
-						console.error("maximum encoding size for ordinal exceeded: str16.");
+						console.error("maximum encoding size for ordinal exceeded: ord16.");
 						console.error("data loss may occur.");
 						// TODO: do something useful?
 					}
