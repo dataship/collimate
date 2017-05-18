@@ -275,7 +275,8 @@ function collimate(rows){
 			for(var s in distinct){
 				// map integer to distinct value
 				// use distinct[s] (instead of s) to get actual (non-string) value
-				decoder[k] = distinct[s];
+				if(types[j] == 'str') decoder[k] = distinct[s];
+				else decoder[k] = +distinct[s];
 				// map distinct value to integer
 				encoder[distinct[s]] = k;
 				k++;
