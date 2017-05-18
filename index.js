@@ -90,7 +90,7 @@ var ext_map = {
 	"str" : ".json"
 };
 
-function collimate(rows){
+function collimate(rows, parse_dates){
 
 	if (rows == null || rows.length == 0) return { "columns" : {}, "keys" : {}, "types" : []};
 
@@ -347,7 +347,8 @@ function collimate(rows){
 
 					decoder = decoders[name];
 					encoded = decoder.length;
-					decoder.push(value);
+					if(type == 'str') decoder.push(value);
+					else decoder.push(+value);
 					encoder[value] = encoded;
 
 				}
@@ -409,6 +410,8 @@ if(require.main === module){
 	var argv = require('yargs')
 		.usage('Convert a CSV into typed columns\nUsage: $0 [options] <file>')
 		.demand(1)
+		.default('d', false).alias('d', 'date')
+		.describe('d', 'auto-detect dates and normalize to ISO 8601')
 		.help('h').alias('h', 'help')
 		.argv
 
@@ -417,7 +420,7 @@ if(require.main === module){
 	var text = fs.readFileSync(fpath);
 	var rows = parse(text, {delimiter: ',', columns:true, trim:true, auto_parse:false});
 
-	var result = collimate(rows);
+	var result = collimate(rows, argv.d);
 	//console.log(Object.keys(result.columns));
 	//console.log(Object.keys(result.keys));
 	//console.log(result.types);
