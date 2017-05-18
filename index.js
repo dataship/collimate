@@ -120,13 +120,22 @@ function collimate(rows){
 		// is the value a number?
 		if(isnumber(value)){
 			// yes, refine it
-			if(isinteger(value)) types[j] = 'int32';
-			else types[j] = 'float32';
+			if(isinteger(value)){
+				if(value <= 2147483647) types[j] = 'int32';
+				else types[j] = 'str';
+			} else{
+				types[j] = 'float32';
+			}
 		} else {
 			// no, try parsing it
-			if(+value === +value){
-				if(isinteger(+value)) types[j] = 'int32';
-				else types[j] = 'float32';
+			var num = +value;
+			if(num === +value){
+				if(isinteger(num)){
+					if(num <= 2147483647) types[j] = 'int32';
+					else types[j] = 'str';
+				} else{
+					types[j] = 'float32';
+				}
 			} else if(value in NULL_SET) {
 				value = null;
 				types[j] = 'int32';
@@ -199,8 +208,12 @@ function collimate(rows){
 				// yes, check for deviations from int
 				if(!isnumber(value)){
 					if(+value === +value) {
-						if(isinteger(+value)) types[j] = 'int32';
-						else types[j] = 'float32';
+						if(isinteger(+value)){
+							if(num <= 2147483647) types[j] = 'int32';
+							else types[j] = 'str';
+						} else {
+							types[j] = 'float32';
+						}
 					} else if(value in NULL_SET) {
 						value = null;
 					} else {
@@ -231,7 +244,7 @@ function collimate(rows){
 
 			// ordinal?
 			distinct = distincts[j];
-			if(true || counts[j] <= threshold){
+			if(counts[j] <= threshold){
 				if(!(value in distinct)){
 					distinct[value] = value;
 					counts[j] += 1;
@@ -386,6 +399,8 @@ if(require.main === module){
 
 		min scan percentage: minimal percentage to scan
 		min scan length: minimal count to scan
+
+		recognize and normalize to date-times to ISO standard
 
 		data dirtiness levels: pristine, clean, dirty, toxic
 
