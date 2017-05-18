@@ -147,7 +147,7 @@ function collimate(rows){
 
 		// initialize the set of distinct values
 		distincts[j] = {};
-		distincts[j][value] = value;
+		distincts[j][value] = 0;
 		counts[j] = 1;
 	}
 
@@ -246,7 +246,7 @@ function collimate(rows){
 			distinct = distincts[j];
 			if(counts[j] <= threshold){
 				if(!(value in distinct)){
-					distinct[value] = value;
+					distinct[value] = counts[j];
 					counts[j] += 1;
 				}
 			}
@@ -268,18 +268,17 @@ function collimate(rows){
 		count = counts[j];
 		if(count <= threshold){
 			// yes, encode
-			var distinct = distincts[j];
-			var decoder = [];
-			var encoder = {};
-			var k = 0;
-			for(var s in distinct){
+			var encoder = distincts[j];
+			var decoder = new Array(counts[j]);
+			var k;
+			for(var s in encoder){
 				// map integer to distinct value
-				// use distinct[s] (instead of s) to get actual (non-string) value
-				if(types[j] == 'str') decoder[k] = distinct[s];
-				else decoder[k] = +distinct[s];
-				// map distinct value to integer
-				encoder[distinct[s]] = k;
-				k++;
+				// get order
+				k = encoder[s];
+
+				// parse as number if numeric type
+				if(types[j] == 'str') decoder[k] = s;
+				else decoder[k] = +s;
 			}
 
 			decoders[name] = decoder;
