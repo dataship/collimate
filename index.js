@@ -1,3 +1,4 @@
+#! /usr/bin/env node
 /* csv parser that produces typed columnar output */
 var fs = require('fs'),
 	path = require('path'),
@@ -377,54 +378,72 @@ function sanitize(str){
 	return sane;
 }
 
-var args = process.argv;
-if(args.length < 3) throw new Error("Not enough arguments");
 
-var fpath = args[2];
-var text = fs.readFileSync(fpath);
-var rows = parse(text, {delimiter: ',', columns:true, trim:true, auto_parse:false});
+// called directly?
+if(require.main === module){
+	/* potential options:
+		scan options: constant, percentage, full OR minimal, complete
 
-var result = collimate(rows);
-//console.log(Object.keys(result.columns));
-//console.log(Object.keys(result.keys));
-//console.log(result.types);
-/*
-for(key in result.keys){
-	var vals = result.keys[key];
-	console.log(vals.slice(0, 10));
-}*/
-// write columns
+		min scan percentage: minimal percentage to scan
+		min scan length: minimal count to scan
 
-// create directory
-var fext = path.extname(fpath);
-var fname = path.basename(fpath, fext);
+		data dirtiness levels: pristine, clean, dirty, toxic
 
-if (!fs.existsSync(fname)){
-	console.log("creating directory " + fname);
-	fs.mkdirSync(fname);
-}
+	 */
+	// yes, parse command line args and show something
+	var argv = require('yargs')
+		.usage('Convert a CSV into typed columns\nUsage: $0 [options] <file>')
+		.demand(1)
+		.help('h').alias('h', 'help')
+		.argv
 
+	var fpath = argv._[0];
 
-// write files
-var dir = fname + "/";
-var ext;
-var sane_name;
-for(var name in result.columns){
+	var text = fs.readFileSync(fpath);
+	var rows = parse(text, {delimiter: ',', columns:true, trim:true, auto_parse:false});
 
-	// write columns to file
-	sane_name = sanitize(name);
+	var result = collimate(rows);
+	//console.log(Object.keys(result.columns));
+	//console.log(Object.keys(result.keys));
+	//console.log(result.types);
+	/*
+	for(key in result.keys){
+		var vals = result.keys[key];
+		console.log(vals.slice(0, 10));
+	}*/
+	// write columns
 
-	ext = ext_map[result.types[name]];
-	console.log("writing file: " + dir + sane_name + ext);
-	if(ext == ".json"){
-		fs.writeFileSync(dir + sane_name + ext, JSON.stringify(result.columns[name], null, 1));
-	} else {
-		fs.writeFileSync(dir + sane_name + ext, new Buffer(result.columns[name].buffer));
+	// create directory
+	var fext = path.extname(fpath);
+	var fname = path.basename(fpath, fext);
+
+	if (!fs.existsSync(fname)){
+		console.log("creating directory " + fname);
+		fs.mkdirSync(fname);
 	}
 
-	// do we need to write a key file?
-	if(name in result.keys){
-		// yes
-		fs.writeFileSync(dir + sane_name + ".key", JSON.stringify(result.keys[name], null, 1));
+
+	// write files
+	var dir = fname + "/";
+	var ext;
+	var sane_name;
+	for(var name in result.columns){
+
+		// write columns to file
+		sane_name = sanitize(name);
+
+		ext = ext_map[result.types[name]];
+		console.log("writing file: " + dir + sane_name + ext);
+		if(ext == ".json"){
+			fs.writeFileSync(dir + sane_name + ext, JSON.stringify(result.columns[name], null, 1));
+		} else {
+			fs.writeFileSync(dir + sane_name + ext, new Buffer(result.columns[name].buffer));
+		}
+
+		// do we need to write a key file?
+		if(name in result.keys){
+			// yes
+			fs.writeFileSync(dir + sane_name + ".key", JSON.stringify(result.keys[name], null, 1));
+		}
 	}
 }

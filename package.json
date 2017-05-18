@@ -1,7 +1,8 @@
 {
-  "name": "collimate",
+  "name": "dataship-collimate",
   "version": "1.0.0",
   "description": "convert a list of records into typed columns",
+  "author": "",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
@@ -13,9 +14,12 @@
     "columnar",
     "database"
   ],
-  "author": "",
   "license": "MIT",
-  "dependencies": {
-    "csv-parse": "^1.2.0"
+  "bin": {
+    "collimate": "index.js"
+  },
+  "devDependencies": {
+    "csv-parse": "^1.2.0",
+    "yargs": "^8.0.1"
   }
 }
