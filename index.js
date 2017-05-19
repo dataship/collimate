@@ -90,13 +90,18 @@ var ext_map = {
 	"str" : ".json"
 };
 
-function collimate(rows, parse_dates){
+function collimate(rows, parse_dates, verbose){
 
 	if (rows == null || rows.length == 0) return { "columns" : {}, "keys" : {}, "types" : []};
 
 	var N = rows.length;
 	var row = rows[0];
 
+	var t0;
+	if(argv.v){
+		process.stdout.write("Determining types... ");
+		t0 = Date.now();
+	}
 	// how many columns?
 	// what are their names?
 	var names = Object.keys(row);
@@ -252,7 +257,12 @@ function collimate(rows, parse_dates){
 			}
 		}
 	}
+	if(argv.v) console.log("done! ("+ (Date.now() - t0)+" ms)");
 
+	if(argv.v){
+		process.stdout.write("Creating columns... ");
+		t0 = Date.now();
+	}
 	//console.log(counts);
 
 	// create columns
@@ -372,6 +382,7 @@ function collimate(rows, parse_dates){
 
 		}
 	}
+	if(argv.v) console.log("done! ("+ (Date.now() - t0)+" ms)");
 
 	type_map = {}
 	for(var j = 0; j < names.length; j++) type_map[names[j]] = types[j];
@@ -410,17 +421,25 @@ if(require.main === module){
 	var argv = require('yargs')
 		.usage('Convert a CSV into typed columns\nUsage: $0 [options] <file>')
 		.demand(1)
-		.default('d', false).alias('d', 'date')
+		.boolean('d').alias('d', 'date')
 		.describe('d', 'auto-detect dates and normalize to ISO 8601')
+		.boolean('v').describe('v', "print information about what we're doing")
 		.help('h').alias('h', 'help')
 		.argv
 
+	var t0;
 	var fpath = argv._[0];
 
+	if(argv.v){
+		process.stdout.write("Parsing CSV... ");
+		t0 = Date.now();
+	}
 	var text = fs.readFileSync(fpath);
-	var rows = parse(text, {delimiter: ',', columns:true, trim:true, auto_parse:false});
 
-	var result = collimate(rows, argv.d);
+	var rows = parse(text, {delimiter: ',', columns:true, trim:true, auto_parse:false});
+	if(argv.v) console.log("done! ("+ (Date.now() - t0)+" ms)");
+
+	var result = collimate(rows, argv.d, argv.v);
 	//console.log(Object.keys(result.columns));
 	//console.log(Object.keys(result.keys));
 	//console.log(result.types);
@@ -435,8 +454,12 @@ if(require.main === module){
 	var fext = path.extname(fpath);
 	var fname = path.basename(fpath, fext);
 
+	if(argv.v){
+		process.stdout.write("Writing files... ");
+		t0 = Date.now();
+	}
 	if (!fs.existsSync(fname)){
-		console.log("creating directory " + fname);
+		//console.log("creating directory " + fname);
 		fs.mkdirSync(fname);
 	}
 
@@ -451,7 +474,8 @@ if(require.main === module){
 		sane_name = sanitize(name);
 
 		ext = ext_map[result.types[name]];
-		console.log("writing file: " + dir + sane_name + ext);
+		//console.log("writing file: " + dir + sane_name + ext);
+		//process.stdout.write(".");
 		if(ext == ".json"){
 			fs.writeFileSync(dir + sane_name + ext, JSON.stringify(result.columns[name], null, 1));
 		} else {
@@ -464,4 +488,5 @@ if(require.main === module){
 			fs.writeFileSync(dir + sane_name + ".key", JSON.stringify(result.keys[name], null, 1));
 		}
 	}
+	if(argv.v) console.log("done! ("+ (Date.now() - t0)+" ms)");
 }
