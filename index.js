@@ -4,8 +4,10 @@ var fs = require('fs'),
 	path = require('path'),
 	parse = require('csv-parse/lib/sync');
 
-function isnumber(obj){ return Object.prototype.toString.call(obj) === "[object Number]";}
-function isinteger(num){ return num % 1 === 0;}
+function isarray(obj){ return Object.prototype.toString.call(obj) === "[object Array]"; }
+function isnumber(obj){ return Object.prototype.toString.call(obj) === "[object Number]"; }
+function isinteger(num){ return num % 1 === 0; }
+function type(obj){ return Object.prototype.toString.call(obj).slice(8, -1); }
 
 // type scanning strategies:
 // constant, percentage, full
@@ -19,17 +21,17 @@ function isinteger(num){ return num % 1 === 0;}
 const MIN_SCAN_COUNT = 1000;
 const MIN_SCAN_FRACTION = 0.3;
 
-// map of percentage scanned to percentage ordinals likely encountered
+// map of percentage scanned to percentage categoricals likely encountered
 // given large enough N
 // 20% -> 80%
 // 10% -> 75%
 // 4% -> 64%
 // 1% -> 50%
 
-// if the number of distinct values in a column is less than this, we consider it ordinal
-const ORDINAL_FRACTION = 0.3; // this should probably be logarithmic, instead of linear
+// if the number of distinct values in a column is less than this, we consider it categorical
+const CATEGORICAL_FRACTION = 0.3; // this should probably be logarithmic, instead of linear
 
-// the fraction of all ordinal values we are likely to encounter as a function of
+// the fraction of all categorical values we are likely to encounter as a function of
 // sample percentage.
 const SAMPLING_ENCOUNTER_FRACTION_MAP = {
 		"1.0" : 1.0,
@@ -51,7 +53,7 @@ const SAMPLING_ENCOUNTER_FRACTION_MAP = {
 // https://en.wikipedia.org/wiki/Entropy_(information_theory)#Data_as_a_Markov_process
 const ENTROPIC_ENCOUNTER_EXPONENT = 2; // inverse of entropy
 
-const MAX_ORDINAL = 65536;
+const MAX_CATEGORICAL = 65536;
 
 // values to consider as null
 const NULL_SET = {
@@ -108,8 +110,8 @@ function collimate(rows, parse_dates, verbose){
 
 	// what are their types?
 	// int8,int16,int32, float32,float64, str8,str16, json
-	// are any of them ordinal?
-	// do the ordinal columns have NULLS?
+	// are any of them categorical?
+	// do the categorical columns have NULLS?
 
 	// guess types from first row
 	// we start with the narrowest type that will accommodate the value found
@@ -163,15 +165,15 @@ function collimate(rows, parse_dates, verbose){
 	//console.log(N);
 	//console.log(scan);
 
-	// what threshold is ordinal?
-	// TODO: figure out how to integrate these concepts for determining ordinality:
+	// what threshold is categorical?
+	// TODO: figure out how to integrate these concepts for determining categorical:
 	// https://en.wikipedia.org/wiki/Diversity_index#True_diversity
 	// https://en.wikipedia.org/wiki/Entropy_(information_theory)#Entropy_as_a_measure_of_diversity
 	// http://stackoverflow.com/questions/990477/how-to-calculate-the-entropy-of-a-file
 	// https://en.wikipedia.org/wiki/Entropy_(information_theory)#Data_as_a_Markov_process
-	var threshold = Math.min(Math.ceil(N * ORDINAL_FRACTION), MAX_ORDINAL);
+	var threshold = Math.min(Math.ceil(N * CATEGORICAL_FRACTION), MAX_CATEGORICAL);
 
-	// adjust ordinal threshold based on how much of the data we're scanning
+	// adjust categorical threshold based on how much of the data we're scanning
 	var sample_fraction = scan / N;
 	var estimated_encounter_fraction;
 	for(fraction in SAMPLING_ENCOUNTER_FRACTION_MAP){
@@ -195,8 +197,8 @@ function collimate(rows, parse_dates, verbose){
 
 	// if it contain strings that don't map to the null set, it's a string
 
-	// all columns should be checked for ordinality
-	// a column is ordinal if it's count of distinct values is less than some
+	// all columns should be checked for categoricalness
+	// a column is categorical if it's count of distinct values is less than some
 	// threshold percentage of it's length (10%).
 
 	//console.log(types);
@@ -247,10 +249,12 @@ function collimate(rows, parse_dates, verbose){
 				}
 			}
 
-			// ordinal?
+			// is the count for this field below the categorical threshold?
 			distinct = distincts[j];
 			if(counts[j] <= threshold){
+				// yes, have we seen the current value?
 				if(!(value in distinct)){
+					// no, add and update count
 					distinct[value] = counts[j];
 					counts[j] += 1;
 				}
@@ -274,7 +278,7 @@ function collimate(rows, parse_dates, verbose){
 		name = names[j];
 		type = types[j];
 
-		// is it ordinal?
+		// is this field categorical?
 		count = counts[j];
 		if(count <= threshold){
 			// yes, encode
@@ -282,8 +286,7 @@ function collimate(rows, parse_dates, verbose){
 			var decoder = new Array(counts[j]);
 			var k;
 			for(var s in encoder){
-				// map integer to distinct value
-				// get order
+				// get order encountered in data set
 				k = encoder[s];
 
 				// parse as number if numeric type
@@ -298,11 +301,9 @@ function collimate(rows, parse_dates, verbose){
 			if(count <= (256 * estimated_encounter_fraction)){
 				// yes
 				columns[name] = new Uint8Array(N);
-				types[j] = 'ord8';
 			} else {
 				// no, use 16 bit encoding
 				columns[name] = new Uint16Array(N);
-				types[j] = 'ord16';
 			}
 		} else if(type == "str"){
 			// no, it's untyped
@@ -325,11 +326,9 @@ function collimate(rows, parse_dates, verbose){
 			count = counts[name];
 			column = columns[name];
 
-			// TODO: null interplay with ordinal?
-			//if(value in NULL_SET) value = null;
-
-			// ordinal?
+			// categorical?
 			if(name in encoders){
+				// yes
 				encoder = encoders[name];
 				// is it a null representation?
 				if(value in NULL_SET) value = null;
@@ -339,18 +338,17 @@ function collimate(rows, parse_dates, verbose){
 					// yes, retrieve it
 					encoded = encoder[value];
 				} else {
-					// no, we need to add it to the set of possible values
+					// no, add it to the set of possible values
 
-					// does it expand us beyond our allotted encoding capacity?
-					if(count > 256 && type == "ord8"){
+					// will it expand the set beyond current encoding capacity?
+					if(count == 256 && type(column) == "Uint8Array"){
 						// yes, expand 8 bit encoding to 16 bit
-						console.error("alloted encoding size for ordinal exceeded: ord8.");
-						console.error("reallocating as ord16.");
+						console.error("alloted encoding size for categorical exceeded (8-bit): " + name);
+						console.error("reallocating as 16-bit.");
 						columns[name] = new Uint16Array(column);
-						types[j] = "ord16";
-					} else if (count > 65536 && type == "ord16"){
+					} else if (count == 65536 && type(column) == "Uint16Array"){
 						// yes, 16 bit isn't big enough
-						console.error("maximum encoding size for ordinal exceeded: ord16.");
+						console.error("maximum encoding size for categorical exceeded (16-bit): " + name);
 						console.error("data loss may occur.");
 						// TODO: do something useful?
 					}
@@ -360,6 +358,7 @@ function collimate(rows, parse_dates, verbose){
 					if(type == 'str') decoder.push(value);
 					else decoder.push(+value);
 					encoder[value] = encoded;
+					counts[name]++;
 
 				}
 				column[i] = encoded;
@@ -401,6 +400,15 @@ function sanitize(str){
 	sane = sane.replace(/\W+/g, '_');
 
 	return sane;
+}
+
+function stringify(obj, type){
+	if(type === 'str'){
+		return "[" + obj.map(function(str){ return '"'+str+'"'}).join(',\n ') +"]\n";
+
+	}
+	return "[" + obj.join(",\n ") +"]\n";
+	//return JSON.stringify(obj, null, 1);
 }
 
 
@@ -466,27 +474,34 @@ if(require.main === module){
 
 	// write files
 	var dir = fname + "/";
-	var ext;
+	var ext, column;
 	var sane_name;
 	for(var name in result.columns){
 
 		// write columns to file
 		sane_name = sanitize(name);
+		column = result.columns[name];
 
-		ext = ext_map[result.types[name]];
-		//console.log("writing file: " + dir + sane_name + ext);
-		//process.stdout.write(".");
-		if(ext == ".json"){
-			fs.writeFileSync(dir + sane_name + ext, JSON.stringify(result.columns[name], null, 1));
-		} else {
-			fs.writeFileSync(dir + sane_name + ext, new Buffer(result.columns[name].buffer));
-		}
-
-		// do we need to write a key file?
+		// is this a categorical column?
 		if(name in result.keys){
+			var decoder = result.keys[name];
 			// yes
-			fs.writeFileSync(dir + sane_name + ".key", JSON.stringify(result.keys[name], null, 1));
+			fs.writeFileSync(dir + sane_name + ".key", stringify(decoder, result.types[name]));
+
+			ext = type(column) == "Uint8Array" ? ".s8" : ".s16";
+
+			fs.writeFileSync(dir + sane_name + ext, new Buffer(column.buffer));
+		} else {
+			ext = ext_map[result.types[name]];
+			//console.log("writing file: " + dir + sane_name + ext);
+			//process.stdout.write(".");
+			if(ext == ".json"){
+				fs.writeFileSync(dir + sane_name + ext, stringify(column, result.types[name]));
+			} else {
+				fs.writeFileSync(dir + sane_name + ext, new Buffer(column.buffer));
+			}
 		}
+
 	}
 	if(argv.v) console.log("done! ("+ (Date.now() - t0)+" ms)");
 }
