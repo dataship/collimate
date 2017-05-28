@@ -2,6 +2,7 @@
 /* csv parser that produces typed columnar output */
 var fs = require('fs'),
 	path = require('path'),
+	moment = require('moment'),
 	parse = require('csv-parse/lib/sync');
 
 function isarray(obj){ return Object.prototype.toString.call(obj) === "[object Array]"; }
@@ -73,9 +74,7 @@ var constructor_map = {
 	"int32" : Int32Array,
 	"uint32" : Uint32Array,
 	"float32" : Float32Array,
-	"flout64" : Float64Array,
-	"ord8" : Int8Array,
-	"ord16" : Int16Array
+	"float64" : Float64Array
 };
 
 var ext_map = {
@@ -87,10 +86,48 @@ var ext_map = {
 	"uint32" : ".u32",
 	"float32" : ".f32",
 	"float64" : ".f64",
-	"ord8" : ".s8",
-	"ord16" : ".s16",
 	"str" : ".json"
 };
+
+var ISO_DATE = "YYYY-MM-DD HH:mm:ss.SSSZZ"; // ISO-8601
+
+/* parse date based on
+	* is it a string?
+	* is the length of that string in the right range?
+	* does it parse exactly with the format(s) of matching length?
+	* is the format consistent across all samples?
+ */
+// moment
+// all lengths are 8 - 10
+var DATE_FORMATS = [
+	"YYYY-M-D", // ISO
+	"YYYY/M/D",
+
+	"D-M-YYYY", // most common global format
+	"D/M/YYYY",
+
+	"M-D-YYYY", // u.s.
+	"M/D/YYYY"
+];
+
+var TIME_FORMATS = [
+	"HH:mm", // 5
+
+	"hh:mm A", // 8
+	"hh:mmA", // 7
+
+	"HH:mm:ss", // 8
+
+	"hh:mm:ss A", // 11
+	"hh:mm:ssA", // 10
+
+	"HH:mm:ss.S", // 10
+	"HH:mm:ss.SS", // 11
+	"HH:mm:ss.SSS", // 12
+];
+
+var VALID_DATE_LENGTHS = [5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22];
+
 
 function collimate(rows, parse_dates, verbose){
 
@@ -113,12 +150,13 @@ function collimate(rows, parse_dates, verbose){
 	// are any of them categorical?
 	// do the categorical columns have NULLS?
 
-	// guess types from first row
-	// we start with the narrowest type that will accommodate the value found
-	// int32 -> float32 -> str
 	var types = [];
 	var distincts = [];
 	var counts = [];
+	var date_matches = {};
+	// guess types from first row
+	// we start with the narrowest type that will accommodate the value found
+	// int32 -> float32 -> str
 	var name, value;
 	for(var j = 0; j < names.length; j++){
 		name = names[j];
@@ -146,6 +184,26 @@ function collimate(rows, parse_dates, verbose){
 			} else if(value in NULL_SET) {
 				value = null;
 				types[j] = 'int32';
+			} else if(value.length >= 8 && value.length <= 10){
+				// will it parse as a date?
+				var m, format;
+				for(var k = 0; k < DATE_FORMATS.length; k++){
+					format = DATE_FORMATS[k];
+					m = moment(value, format, true);
+					// did it parse with the given format?
+					if(m.isValid()){
+						// yes, record it
+						if(!date_matches[name]) date_matches[name] = [];
+
+						date_matches[name].push(format);
+					}
+				}
+				/*
+				if(name in date_matches)
+					console.log("initial match of " + date_matches[name].length + " formats for " + name);
+					*/
+
+				types[j] = 'str';
 			} else {
 				//assume generic string
 				types[j] = 'str';
@@ -246,6 +304,22 @@ function collimate(rows, parse_dates, verbose){
 				// check for null set membership
 				if(value in NULL_SET) {
 					value = null;
+				} else if(value.length >= 8 && value.length <= 10 && date_matches[name] != null){
+					// yes, will it parse as a date?
+					var m, matched_formats, format;
+					matched_formats = date_matches[name];
+					delete date_matches[name];
+					for(var k = 0; k < matched_formats.length; k++){
+						format = matched_formats[k];
+						m = moment(value, format, true);
+						// did it parse with the given format?
+						if(m.isValid()){
+							// yes, persist it
+							if(!date_matches[name]) date_matches[name] = [];
+
+							date_matches[name].push(format);
+						}
+					}
 				}
 			}
 
@@ -277,11 +351,15 @@ function collimate(rows, parse_dates, verbose){
 	for(var j = 0; j < names.length; j++){
 		name = names[j];
 		type = types[j];
+		/*
+		if(name in date_matches){
+			console.log("matched " + date_matches[name].length + " date formats for " + name);
+		} */
 
 		// is this field categorical?
 		count = counts[j];
 		if(count <= threshold){
-			// yes, encode
+			// yes, encode and set up decoder
 			var encoder = distincts[j];
 			var decoder = new Array(counts[j]);
 			var k;
@@ -290,8 +368,19 @@ function collimate(rows, parse_dates, verbose){
 				k = encoder[s];
 
 				// parse as number if numeric type
-				if(types[j] == 'str') decoder[k] = s;
-				else decoder[k] = +s;
+				if(types[j] == 'str'){
+					// single valid date format?
+					if(name in date_matches && date_matches[name].length == 1){
+						var format = date_matches[name][0];
+						var m = moment(s, format, true);
+						var normalized_length = 10;
+						decoder[k] = m.format(ISO_DATE.slice(0, normalized_length));
+					} else {
+						decoder[k] = s;
+					}
+				} else {
+					decoder[k] = +s;
+				}
 			}
 
 			decoders[name] = decoder;
@@ -355,8 +444,19 @@ function collimate(rows, parse_dates, verbose){
 
 					decoder = decoders[name];
 					encoded = decoder.length;
-					if(type == 'str') decoder.push(value);
-					else decoder.push(+value);
+					if(type == 'str') {
+						// single valid date format?
+						if(name in date_matches && date_matches[name].length == 1){
+							var format = date_matches[name][0];
+							var m = moment(value, format, true);
+							var normalized_length = 10;
+							decoder.push(m.format(ISO_DATE.slice(0, normalized_length)));
+						} else {
+							decoder.push(value);
+						}
+					} else{
+						decoder.push(+value);
+					}
 					encoder[value] = encoded;
 					counts[name]++;
 
@@ -374,6 +474,11 @@ function collimate(rows, parse_dates, verbose){
 						value = +value;
 					else
 						value = NaN;
+				} else if(name in date_matches && date_matches[name].length == 1){
+					var format = date_matches[name][0];
+					var m = moment(value, format, true);
+					var normalized_length = 10;
+					value = m.format(ISO_DATE.slice(0, normalized_length));
 				}
 
 				column[i] = value;
