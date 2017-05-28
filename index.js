@@ -370,7 +370,7 @@ function collimate(rows, parse_dates, verbose){
 				// parse as number if numeric type
 				if(types[j] == 'str'){
 					// single valid date format?
-					if(name in date_matches && date_matches[name].length == 1){
+					if(name in date_matches && date_matches[name].length == 1 && parse_dates){
 						var format = date_matches[name][0];
 						var m = moment(s, format, true);
 						var normalized_length = 10;
@@ -446,7 +446,7 @@ function collimate(rows, parse_dates, verbose){
 					encoded = decoder.length;
 					if(type == 'str') {
 						// single valid date format?
-						if(name in date_matches && date_matches[name].length == 1){
+						if(name in date_matches && date_matches[name].length == 1 && parse_dates){
 							var format = date_matches[name][0];
 							var m = moment(value, format, true);
 							var normalized_length = 10;
@@ -474,7 +474,7 @@ function collimate(rows, parse_dates, verbose){
 						value = +value;
 					else
 						value = NaN;
-				} else if(name in date_matches && date_matches[name].length == 1){
+				} else if(name in date_matches && date_matches[name].length == 1 && parse_dates){
 					var format = date_matches[name][0];
 					var m = moment(value, format, true);
 					var normalized_length = 10;
