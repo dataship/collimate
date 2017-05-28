@@ -137,7 +137,7 @@ function collimate(rows, parse_dates, verbose){
 	var row = rows[0];
 
 	var t0;
-	if(argv.v){
+	if(verbose){
 		process.stdout.write("Determining types... ");
 		t0 = Date.now();
 	}
@@ -184,7 +184,7 @@ function collimate(rows, parse_dates, verbose){
 			} else if(value in NULL_SET) {
 				value = null;
 				types[j] = 'int32';
-			} else if(value.length >= 8 && value.length <= 10){
+			} else if(parse_dates && value.length >= 8 && value.length <= 10){
 				// will it parse as a date?
 				var m, format;
 				for(var k = 0; k < DATE_FORMATS.length; k++){
@@ -304,7 +304,7 @@ function collimate(rows, parse_dates, verbose){
 				// check for null set membership
 				if(value in NULL_SET) {
 					value = null;
-				} else if(value.length >= 8 && value.length <= 10 && date_matches[name] != null){
+				} else if(parse_dates && value.length >= 8 && value.length <= 10 && date_matches[name] != null){
 					// yes, will it parse as a date?
 					var m, matched_formats, format;
 					matched_formats = date_matches[name];
@@ -335,9 +335,9 @@ function collimate(rows, parse_dates, verbose){
 			}
 		}
 	}
-	if(argv.v) console.log("done! ("+ (Date.now() - t0)+" ms)");
+	if(verbose) console.log("done! ("+ (Date.now() - t0)+" ms)");
 
-	if(argv.v){
+	if(verbose){
 		process.stdout.write("Creating columns... ");
 		t0 = Date.now();
 	}
@@ -370,7 +370,7 @@ function collimate(rows, parse_dates, verbose){
 				// parse as number if numeric type
 				if(types[j] == 'str'){
 					// single valid date format?
-					if(name in date_matches && date_matches[name].length == 1 && parse_dates){
+					if(parse_dates && name in date_matches && date_matches[name].length == 1){
 						var format = date_matches[name][0];
 						var m = moment(s, format, true);
 						var normalized_length = 10;
@@ -446,7 +446,7 @@ function collimate(rows, parse_dates, verbose){
 					encoded = decoder.length;
 					if(type == 'str') {
 						// single valid date format?
-						if(name in date_matches && date_matches[name].length == 1 && parse_dates){
+						if(parse_dates && name in date_matches && date_matches[name].length == 1){
 							var format = date_matches[name][0];
 							var m = moment(value, format, true);
 							var normalized_length = 10;
@@ -474,7 +474,7 @@ function collimate(rows, parse_dates, verbose){
 						value = +value;
 					else
 						value = NaN;
-				} else if(name in date_matches && date_matches[name].length == 1 && parse_dates){
+				} else if(parse_dates && name in date_matches && date_matches[name].length == 1){
 					var format = date_matches[name][0];
 					var m = moment(value, format, true);
 					var normalized_length = 10;
@@ -486,7 +486,7 @@ function collimate(rows, parse_dates, verbose){
 
 		}
 	}
-	if(argv.v) console.log("done! ("+ (Date.now() - t0)+" ms)");
+	if(verbose) console.log("done! ("+ (Date.now() - t0)+" ms)");
 
 	type_map = {}
 	for(var j = 0; j < names.length; j++) type_map[names[j]] = types[j];
