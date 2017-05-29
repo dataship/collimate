@@ -509,7 +509,7 @@ function sanitize(str){
 
 function stringify(obj, type){
 	if(type === 'str'){
-		return "[" + obj.map(function(str){ return '"'+str+'"'}).join(',\n ') +"]\n";
+		return "[" + obj.map(function(str){ return JSON.stringify(str)}).join(',\n ') +"]\n";
 
 	}
 	return "[" + obj.join(",\n ") +"]\n";
