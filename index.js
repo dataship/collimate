@@ -508,12 +508,16 @@ function sanitize(str){
 }
 
 function stringify(obj, type){
-	if(type === 'str'){
-		return "[" + obj.map(function(str){ return JSON.stringify(str)}).join(',\n ') +"]\n";
 
+	if(isarray(obj)){
+		if(type === 'str'){
+			return "[" + obj.map(function(str){ return JSON.stringify(str)}).join(',\n ') +"]\n";
+		}
+		return "[" + obj.join(",\n ") +"]\n";
 	}
-	return "[" + obj.join(",\n ") +"]\n";
-	//return JSON.stringify(obj, null, 1);
+
+	return "{" + Object.keys(obj).map(function(key){ return '"' + key + '" : ' + JSON.stringify(obj[key]); }).join(',\n ') + "}\n";
+	return JSON.stringify(obj, null, 1);
 }
 
 
@@ -536,6 +540,8 @@ if(require.main === module){
 		.demand(1)
 		.boolean('d').alias('d', 'date')
 		.describe('d', 'auto-detect dates and normalize to ISO 8601')
+		.boolean('i').alias('i', 'index')
+		.describe('i', "create an index file describing the dataset")
 		.boolean('v').describe('v', "print information about what we're doing")
 		.help('h').alias('h', 'help')
 		.argv
@@ -581,6 +587,7 @@ if(require.main === module){
 	var dir = fname + "/";
 	var ext, column;
 	var sane_name;
+	var index = {};
 	for(var name in result.columns){
 
 		// write columns to file
@@ -593,7 +600,7 @@ if(require.main === module){
 			// yes
 			fs.writeFileSync(dir + sane_name + ".key", stringify(decoder, result.types[name]));
 
-			ext = type(column) == "Uint8Array" ? ".s8" : ".s16";
+			ext = type(column) == "Uint8Array" ? ".k8" : ".k16";
 
 			fs.writeFileSync(dir + sane_name + ext, new Buffer(column.buffer));
 		} else {
@@ -606,7 +613,12 @@ if(require.main === module){
 				fs.writeFileSync(dir + sane_name + ext, new Buffer(column.buffer));
 			}
 		}
+		index[name] = sane_name + ext;
+	}
 
+	// write index?
+	if(argv.i){
+		fs.writeFileSync(dir + "index.json", stringify(index));
 	}
 	if(argv.v) console.log("done! ("+ (Date.now() - t0)+" ms)");
 }
