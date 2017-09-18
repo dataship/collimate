@@ -616,11 +616,11 @@ if(require.main === module){
 		if(name in result.keys){
 			var decoder = result.keys[name];
 			// yes
-			fs.writeFileSync(dir + sane_name + ".key", stringify(decoder, result.types[name]));
-
 			ext = type(column) == "Uint8Array" ? ".k8" : ".k16";
 
 			fs.writeFileSync(dir + sane_name + ext, new Buffer(column.buffer));
+			fs.writeFileSync(dir + sane_name + ext + ".key", stringify(decoder, result.types[name]));
+
 		} else {
 			ext = ext_map[result.types[name]];
 			//console.log("writing file: " + dir + sane_name + ext);

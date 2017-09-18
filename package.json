@@ -1,6 +1,6 @@
 {
   "name": "dataship-collimate",
-  "version": "1.0.0",
+  "version": "4.0.0",
   "description": "convert a list of records into typed columns",
   "author": "",
   "main": "index.js",
