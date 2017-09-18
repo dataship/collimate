@@ -549,13 +549,31 @@ if(require.main === module){
 	var t0;
 	var fpath = argv._[0];
 
-	if(argv.v){
-		process.stdout.write("Parsing CSV... ");
-		t0 = Date.now();
-	}
 	var text = fs.readFileSync(fpath);
 
-	var rows = parse(text, {delimiter: ',', columns:true, trim:true, auto_parse:false});
+	var rows;
+	if(fpath.endsWith(".csv")){
+		if(argv.v){
+			process.stdout.write("Parsing CSV... ");
+			t0 = Date.now();
+		}
+		rows = parse(text, {delimiter: ',', columns:true, trim:true, auto_parse:false});
+	} else if(fpath.endsWith(".tsv")){
+		if(argv.v){
+			process.stdout.write("Parsing TSV... ");
+			t0 = Date.now();
+		}
+		rows = parse(text, {delimiter: '\t', columns:true, trim:true, auto_parse:false});
+	} else if(fpath.endsWith(".json")){
+		if(argv.v){
+			process.stdout.write("Parsing JSON... ");
+			t0 = Date.now();
+		}
+		rows = JSON.parse(text);
+	} else {
+		console.error("Unrecognized extension.");
+		process.exit(1);
+	}
 	if(argv.v) console.log("done! ("+ (Date.now() - t0)+" ms)");
 
 	var result = collimate(rows, argv.d, argv.v);
